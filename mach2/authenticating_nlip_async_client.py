@@ -5,32 +5,47 @@
 # may be reused.
 
 import httpx
+from urllib.parse import urlparse
+
 from nlip_sdk.nlip import NLIP_Message
 
 class AuthenticatingNlipAsyncClient:
 
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self.client = httpx.AsyncClient()
+
+        u = urlparse(base_url)
+
+        if u.scheme == "unix":
+            self.transport = httpx.AsyncHTTPTransport(uds=self.unix_path(u.hostname))
+            self.client = httpx.AsyncClient(transport=self.transport)
+            self.base_url = u._replace(scheme="http").geturl()
+        else:
+            self.transport = httpx.AsyncHTTPTransport()
+            self.client = httpx.AsyncClient(transport=self.transport)
         self.recursion = 0
 
         self.on_login_elicitation = None  # obtain username/password
         self.on_bearer_elicitation = None # obtain bearer token
 
+    def unix_path(self, name:str):
+        "For a unix: scheme, the path of the socket"
+        return f"/tmp/agent-{name}.sock"
+
     # add basic auth to the client and recreate it
     def add_basic_auth(self, username: str, password: str):
         auth = httpx.BasicAuth(username=username, password=password)
-        self.client = httpx.AsyncClient(auth=auth)
+        self.client = httpx.AsyncClient(auth=auth, transport=self.transport)
 
     # add digest auth to the client and recreate it
     def add_digest_auth(self, username: str, password: str):
         auth = httpx.DigestAuth(username=username, password=password)
-        self.client = httpx.AsyncClient(auth=auth)
+        self.client = httpx.AsyncClient(auth=auth, transport=self.transport)
 
     # add digest auth to the client and recreate it
     def add_bearer_token(self, bearer: str):
         headers = { "Authorization" : f"Bearer {bearer}" }
-        self.client = httpx.AsyncClient(headers=headers)
+        self.client = httpx.AsyncClient(headers=headers, transport=self.transport)
 
     # register an elicitation for username/password
     def on_login_requested(self, on_login_elicitation):
